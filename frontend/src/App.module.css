@@ -36,19 +36,26 @@ body {
 
 /* Hero Section */
 .hero {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   position: relative;
   z-index: 1;
+  padding: 2rem 1rem 0 1rem;
+  overflow: hidden;
+}
+
+/* Top Section */
+.topSection {
+  flex-shrink: 0;
 }
 
 /* Title */
 .title {
-  font-size: clamp(2rem, 5vw, 4rem);
-  margin-bottom: 3rem;
+  font-size: clamp(3rem, 5vw, 5rem);
+  margin: 0;
   background: linear-gradient(180deg, #ffcc66 0%, #ff9900 40%, #ff3300 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -69,6 +76,21 @@ body {
   100% {
     filter: brightness(1.3) drop-shadow(0 0 40px #ff3300);
   }
+}
+
+/* Video Spacer */
+.videoSpacer {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Bottom Section */
+.bottomSection {
+  flex-shrink: 0;
+  width: 100%;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, transparent 100%);
+  padding: 2rem 0 1.5rem 0;
+  position: relative;
 }
 
 /* Button Group */
@@ -146,6 +168,143 @@ body {
 .clearButton:hover {
   border-color: #d43f37;
   color: #ff6b6b;
+}
+
+/* Modal Styles */
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal {
+  background: linear-gradient(145deg, #2a1810, #1a0f08);
+  border: 3px solid #8b6914;
+  border-radius: 12px;
+  padding: 2rem;
+  max-width: 500px;
+  width: 100%;
+  box-shadow: 
+    0 20px 60px rgba(0, 0, 0, 0.8),
+    inset 0 1px 0 rgba(212, 175, 55, 0.2);
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(50px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.modalTitle {
+  font-size: 1.8rem;
+  color: #ffd700;
+  margin: 0 0 1.5rem 0;
+  text-align: center;
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+}
+
+.formContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.formLabel {
+  font-size: 0.9rem;
+  color: #b8860b;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.input {
+  padding: 0.8rem;
+  font-size: 1rem;
+  background-color: rgba(0, 0, 0, 0.5);
+  border: 2px solid #8b6914;
+  border-radius: 6px;
+  color: #d4af37;
+  font-family: inherit;
+  outline: none;
+  transition: all 0.3s ease;
+}
+
+.input:focus {
+  border-color: #d4af37;
+  box-shadow: 0 0 10px rgba(212, 175, 55, 0.3);
+}
+
+.modalButtons {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.submitButton,
+.cancelButton {
+  flex: 1;
+  padding: 0.8rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #d4af37;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Noto Sans Devanagari', serif;
+}
+
+.submitButton {
+  background: linear-gradient(145deg, #2a1810, #1a0f08);
+  border: 2px solid #8b6914;
+}
+
+.submitButton:hover {
+  background-color: rgba(212, 175, 55, 0.1);
+  border-color: #d4af37;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(212, 175, 55, 0.3);
+}
+
+.cancelButton {
+  background: linear-gradient(145deg, #3a1810, #2a0f08);
+  border: 2px solid #8b2914;
+}
+
+.cancelButton:hover {
+  background-color: rgba(139, 41, 20, 0.2);
+  border-color: #d43f37;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(212, 67, 55, 0.3);
 }
 
 /* Panchang Section */
@@ -336,6 +495,18 @@ body {
   .grid {
     grid-template-columns: 1fr;
   }
+
+  .modal {
+    padding: 1.5rem;
+  }
+
+  .hero {
+    padding: 1.5rem 1rem 0 1rem;
+  }
+
+  .bottomSection {
+    padding: 1.5rem 0 1rem 0;
+  }
 }
 
 @media (max-width: 480px) {
@@ -346,6 +517,23 @@ body {
   }
 
   .ancientButton {
+    width: 90%;
+  }
+
+  .modalButtons {
+    flex-direction: column;
+  }
+
+  .submitButton,
+  .cancelButton {
     width: 100%;
+  }
+
+  .hero {
+    padding: 1rem 0.5rem 0 0.5rem;
+  }
+
+  .bottomSection {
+    padding: 1rem 0 0.8rem 0;
   }
 }

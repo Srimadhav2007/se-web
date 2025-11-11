@@ -7,27 +7,39 @@ function App() {
   const [panchang, setPanchang] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showPanchang, setShowPanchang] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [formData, setFormData] = useState({
+    date: '2025-11-14',
+    time: '10:30',
+    timezone: 'Asia/Kolkata'
+  });
 
-  async function fetchPanchang() {
+  async function fetchPanchang(data) {
     try {
       setLoading(true);
       const response = await axios.get('/logic/', {
         params: {
-          date: "2025-11-14",
-          time: "10:30",
-          timezone: "Asia/Kolkata"
+          date: data.date,
+          time: data.time,
+          timezone: data.timezone
         }
       });
       setPanchang(response.data);
       setShowPanchang(true);
+      setShowModal(false);
       setTimeout(() => {
         document.getElementById('panchangSection')?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
     } catch (error) {
       console.error("Error fetching Panchang:", error);
+      alert("Failed to fetch Panchang data. Please try again.");
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleSubmit() {
+    fetchPanchang(formData);
   }
 
   function clearPanchang() {
@@ -36,32 +48,109 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  function handleInputChange(e) {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  }
+
   return (
     <div className={styles.container}>
       <video src={background} className={styles.background} muted autoPlay loop></video>
       
       <div className={styles.hero}>
-        <h1 className={styles.title}>कालरूपाय नमः शिवाय||</h1>
+        <div className={styles.topSection}>
+          <h1 className={styles.title}>कालरूपाय नमः शिवाय||</h1>
+        </div>
         
-        <div className={styles.buttonGroup}>
-          <button 
-            onClick={fetchPanchang} 
-            className={styles.ancientButton}
-            disabled={loading}
-          >
-            {loading ? '⏳ Loading...' : '🕉️ Fetch Panchang'}
-          </button>
-          
-          {showPanchang && (
+        <div className={styles.videoSpacer}></div>
+        
+        <div className={styles.bottomSection}>
+          <div className={styles.buttonGroup}>
             <button 
-              onClick={clearPanchang} 
-              className={`${styles.ancientButton} ${styles.clearButton}`}
+              onClick={() => setShowModal(true)} 
+              className={styles.ancientButton}
+              disabled={loading}
             >
-              🗙 Clear
+              {loading ? '⏳ Loading...' : '🕉️ Fetch Panchang'}
             </button>
-          )}
+            
+            {showPanchang && (
+              <button 
+                onClick={clearPanchang} 
+                className={`${styles.ancientButton} ${styles.clearButton}`}
+              >
+                🗙 Clear
+              </button>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Modal */}
+      {showModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowModal(false)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h2 className={styles.modalTitle}>Enter Panchang Details</h2>
+            <div className={styles.formContainer}>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Date</label>
+                <input
+                  type="date"
+                  name="date"
+                  value={formData.date}
+                  onChange={handleInputChange}
+                  className={styles.input}
+                />
+              </div>
+
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Time</label>
+                <input
+                  type="time"
+                  name="time"
+                  value={formData.time}
+                  onChange={handleInputChange}
+                  className={styles.input}
+                />
+              </div>
+
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Timezone</label>
+                <select
+                  name="timezone"
+                  value={formData.timezone}
+                  onChange={handleInputChange}
+                  className={styles.input}
+                >
+                  <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                  <option value="Asia/Dubai">Asia/Dubai (GST)</option>
+                  <option value="America/New_York">America/New_York (EST)</option>
+                  <option value="Europe/London">Europe/London (GMT)</option>
+                  <option value="Asia/Singapore">Asia/Singapore (SGT)</option>
+                </select>
+              </div>
+
+              <div className={styles.modalButtons}>
+                <button 
+                  onClick={handleSubmit} 
+                  className={styles.submitButton}
+                >
+                  Calculate Panchang
+                </button>
+                <button 
+                  onClick={() => setShowModal(false)}
+                  className={styles.cancelButton}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPanchang && panchang && (
         <div id="panchangSection" className={styles.panchangSection}>
