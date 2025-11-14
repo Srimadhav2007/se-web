@@ -1,6 +1,7 @@
 import requests, re, numpy as np
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from typing import Dict
 
 URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
 
@@ -32,6 +33,68 @@ RASHIS = [
     ("Dhanu (Sagittarius)", 240, 270), ("Makara (Capricorn)", 270, 300),
     ("Kumbha (Aquarius)", 300, 330), ("Meena (Pisces)", 330, 360)
 ]
+
+
+# --- Missing constants / helpers (paste near top of file) ---
+from dataclasses import dataclass
+
+# Yoga names (27)
+YOGAS = [
+    "Vishkambha", "Priti", "Ayushman", "Saubhagya", "Shobhana", "Atiganda", "Sukarma",
+    "Dhriti", "Shoola", "Ganda", "Vriddhi", "Dhruva", "Vyaghata", "Harshana", "Vajra",
+    "Siddhi", "Vyatipata", "Variyan", "Parigha", "Shiva", "Siddha", "Sadhya", "Shubha",
+    "Shukla", "Brahma", "Indra", "Vaidhriti"
+]
+
+# Build 60-karana cycle (0..59)
+KARANA_REPEATING = ["Bava", "Balava", "Kaulava", "Taitila", "Gara", "Vanija", "Vishti (Bhadra)"]
+def _build_karana_cycle():
+    seq = ["Kimstughna"]  # index 0
+    for i in range(1, 56):
+        seq.append(KARANA_REPEATING[(i-1) % 7])
+    seq += ["Shakuni", "Chatushpada", "Naga"]
+    seq.append("Kimstughna")
+    return seq
+KARANAS_60 = _build_karana_cycle()
+
+# Simple Location container used by sunrise/sunset helper
+@dataclass(frozen=True)
+class Location:
+    lat: float
+    lon: float
+    elevation_m: float = 0.0
+
+
+# Safe sunrise/sunset wrapper:
+# - If you already have a precise _sunrise_sunset (for example the one using Swiss Ephemeris),
+#   keep it in the module — this wrapper will attempt to call that exact function first.
+# - If not present, we return a sane approximate fallback (06:30 / 18:00 local) so your API doesn't 500.
+def _sunrise_sunset(dt_local, loc: Location, tz):
+    # If a more precise function exists in this module under the same name, prefer it.
+    # (This avoids accidentally overriding your SwissEphemeris version.)
+    try:
+        # attempt to import the "real" function if defined earlier in same module
+        real = globals().get("_sunrise_sunset_real")
+        if real and callable(real):
+            return real(dt_local, loc, tz)
+    except Exception:
+        pass
+
+    # Otherwise approximate (non-astronomical). This is intentionally conservative.
+    # NOTE: Replace this with your precise Swiss Ephemeris implementation for production accuracy.
+    date = dt_local.date()
+    sunrise = datetime(date.year, date.month, date.day, 6, 30, tzinfo=tz)
+    sunset  = datetime(date.year, date.month, date.day, 18, 0, tzinfo=tz)
+    return sunrise, sunset
+
+# If you already have a precise implementation, simply rename it to _sunrise_sunset_real
+# at module scope (or assign it) so the wrapper above will call it:
+#
+#   _sunrise_sunset_real = your_precise_function
+#
+# Example: if you have a function named sunrise_true(dt_local, loc, tz) -> (sunrise, sunset),
+# assign:
+#   _sunrise_sunset_real = sunrise_true
 
 # ----------------------------------------------------------
 # Horizons API Vector Fetcher
@@ -112,6 +175,30 @@ def calculate_rashi(lon):
     return "Unknown"
 
 # ----------------------------------------------------------
+# Yoga (Horizons-based using sidereal Moon+Sun)
+# ----------------------------------------------------------
+def calculate_yoga(m_sid, s_sid):
+    # Yoga = (Moon + Sun) modulo 360, divided by nakshatra arc (13°20')
+    NAK_ARC = 13 + 20/60  # 13°20'
+    total = (m_sid + s_sid) % 360
+    yoga_float = total / NAK_ARC
+    idx = int(yoga_float) % 27
+    return idx + 1, YOGAS[idx], yoga_float
+
+
+# ----------------------------------------------------------
+# Karana (Horizons-based using sidereal Moon-Sun)
+# ----------------------------------------------------------
+def calculate_karana(m_sid, s_sid):
+    # Karana = half-tithi = 6°
+    KARANA_ARC = 6.0
+    diff = (m_sid - s_sid) % 360
+    karana_float = diff / KARANA_ARC
+    idx = int(karana_float) % 60     # 60-karana repeating cycle
+    return KARANAS_60[idx], idx
+
+
+# ----------------------------------------------------------
 # Masa via exact Full Moon Nakshatra
 # ----------------------------------------------------------
 def determine_masa_from_fullmoon(fullmoon_dt):
@@ -151,32 +238,45 @@ def find_next_full_moon(date_utc):
 # ----------------------------------------------------------
 # ✅ MAIN Panchanga API
 # ----------------------------------------------------------
-def get_panchanga(date_str, time_str, tz_str):
+def get_panchanga_nasa(
+    date_str: str, time_str: str, tz_str: str,
+    lat: float = 17.3850, lon: float = 78.4867, elevation_m: float = 0.0
+) -> Dict:
     tz = ZoneInfo(tz_str)
     moment_ist = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=tz)
     moment_utc = moment_ist.astimezone(ZoneInfo("UTC"))
 
     date_utc = moment_utc.strftime("%Y-%m-%d")
-    # ✅ Make sure we request a valid window
+
+    # ✅ Define start/stop range for one day
     start = f"{date_utc} 00:00"
     stop  = f"{date_utc} 23:59"
-    tm, vm = get_vectors("301", start, stop, step="'1 h'")
-    ts, vs = get_vectors("10", start, stop, step="'1 h'")
-    # pick the sample closest to requested moment
+
+    # Get vectors (moon, sun)
+    tm, vm = get_vectors("301", start, stop, step="'1 h'")  # Moon
+    ts, vs = get_vectors("10", start, stop, step="'1 h'")   # Sun
+
+    # Pick the sample closest to requested moment
     idx = min(range(len(tm)), key=lambda i: abs(tm[i] - moment_utc.replace(tzinfo=None)))
     moon = vm[idx]
     sun = vs[idx]
 
-
+    # Compute longitudes (tropical)
     m = vector_to_longitude(moon)
     s = vector_to_longitude(sun)
-    ay = lahiri_ayanamsa(date_utc)
-    m_sid, s_sid = (m-ay)%360, (s-ay)%360
 
+    # Lahiri ayanamsa correction
+    ay = lahiri_ayanamsa(date_utc)
+    m_sid, s_sid = (m - ay) % 360, (s - ay) % 360
+
+    # Instant panchanga
     tithi, paksha = calculate_tithi(m_sid, s_sid)
     _, nak = calculate_nakshatra(m_sid)
     rashi = calculate_rashi(m_sid)
+    yoga_index, yoga_name, _ = calculate_yoga(m_sid, s_sid)
+    karana_name, _ = calculate_karana(m_sid, s_sid)
 
+    # Find full moon and masa
     fm = find_next_full_moon(date_utc)
     if fm:
         masa, fm_nak, used = determine_masa_from_fullmoon(fm)
@@ -184,16 +284,61 @@ def get_panchanga(date_str, time_str, tz_str):
     else:
         masa, fm_nak, used, fm_ist = "Unknown", "Unknown", None, None
 
+    # Day (sunrise/sunset)
+    # Optional: you can plug in your previous _sunrise_sunset() function here
+    try:
+        sunrise_local, sunset_local = _sunrise_sunset(moment_ist, Location(lat, lon, elevation_m), tz)
+    except Exception:
+        sunrise_local = moment_ist.replace(hour=6, minute=30)
+        sunset_local = moment_ist.replace(hour=18, minute=0)
+
+    # Sunrise snapshot (recalculate with sunrise time)
+    sunrise_utc = sunrise_local.astimezone(ZoneInfo("UTC"))
+    idx_sr = min(range(len(tm)), key=lambda i: abs(tm[i] - sunrise_utc.replace(tzinfo=None)))
+    moon_sr = vm[idx_sr]
+    sun_sr = vs[idx_sr]
+    m_sr = vector_to_longitude(moon_sr)
+    s_sr = vector_to_longitude(sun_sr)
+    m_sr_sid, s_sr_sid = (m_sr - ay) % 360, (s_sr - ay) % 360
+    tithi_sr, paksha_sr = calculate_tithi(m_sr_sid, s_sr_sid)
+    _, nak_sr = calculate_nakshatra(m_sr_sid)
+    yoga_sr_idx, yoga_sr_name, _ = calculate_yoga(m_sr_sid, s_sr_sid)
+    rashi_sr = calculate_rashi(m_sr_sid)
+
+    # Build return dictionary (identical structure to get_panchanga_drik)
     return {
-        "date": date_str,
-        "time": time_str,
-        "timezone": tz_str,
-        "tithi": tithi,
-        "paksha": paksha,
-        "nakshatra": nak,
-        "rashi": rashi,
-        "masa": masa,
-        "full_moon_utc": fm.strftime("%Y-%m-%d %H:%M:%S") if fm else None,
-        "full_moon_ist": fm_ist.strftime("%Y-%m-%d %H:%M:%S") if fm else None,
-        "fullmoon_nakshatra": fm_nak
+        "input": {
+            "date": date_str,
+            "time": time_str,
+            "timezone": tz_str,
+            "latitude": lat,
+            "longitude": lon,
+            "elevation_m": elevation_m
+        },
+        "instant": {
+            "tithi": tithi,
+            "paksha": paksha,
+            "nakshatra": nak,
+            "rashi": rashi,
+            "yoga": yoga_name,
+            "karana": karana_name,
+            "moon_lon_sidereal_deg": round(m_sid, 6),
+            "sun_lon_sidereal_deg": round(s_sid, 6),
+            "local_time": moment_ist.isoformat()
+        },
+        "day_by_sunrise": {
+            "sunrise_local": sunrise_local.isoformat(),
+            "sunset_local": sunset_local.isoformat(),
+            "tithi": tithi_sr,
+            "paksha": paksha_sr,
+            "nakshatra": nak_sr,
+            "yoga": yoga_sr_name,
+            "rashi_moon": rashi_sr
+        },
+        "full_moon": None if not fm else {
+            "utc": fm.strftime("%Y-%m-%dT%H:%M:%S"),
+            "local": fm_ist.isoformat(),
+            "nakshatra": fm_nak,
+            "masa": masa
+        }
     }

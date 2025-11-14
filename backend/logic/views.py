@@ -2,7 +2,7 @@ from django.http import JsonResponse
 from . import logic
 from .drik import get_panchanga_drik
 
-"""def get_panchangam(request):
+def get_panchangam(request):
     date = request.GET.get('date')
     time = request.GET.get('time')
     timezone = request.GET.get('timezone')
@@ -12,9 +12,9 @@ from .drik import get_panchanga_drik
     if not all([date, time, timezone]):
         return JsonResponse({'error': 'Missing required parameters: date, time, or timezone'}, status=400)
     result = logic.get_panchanga_nasa(date, time, timezone,lat,lon,elev)
-    return JsonResponse(result,json_dumps_params={"ensure_ascii": False})"""
+    return JsonResponse(result,json_dumps_params={"ensure_ascii": False})
 
-def get_panchangam(request):
+"""def get_panchangam(request):
     date = request.GET.get("date")       # "2025-11-14"
     time = request.GET.get("time")       # "10:30"
     tz   = request.GET.get("timezone")   # "Asia/Kolkata"
@@ -24,4 +24,4 @@ def get_panchangam(request):
     elev = float(request.GET.get("elev", "0"))
 
     data = get_panchanga_drik(date, time, tz, lat, lon, elev)
-    return JsonResponse(data, json_dumps_params={"ensure_ascii": False})
+    return JsonResponse(data, json_dumps_params={"ensure_ascii": False})"""
