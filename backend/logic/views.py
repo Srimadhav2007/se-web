@@ -6,10 +6,13 @@ from .drik import get_panchanga_drik
     date = request.GET.get('date')
     time = request.GET.get('time')
     timezone = request.GET.get('timezone')
+    lat  = float(request.GET.get("lat", "17.3850"))   # Hyderabad default
+    lon  = float(request.GET.get("lon", "78.4867"))
+    elev = float(request.GET.get("elev", "0"))
     if not all([date, time, timezone]):
         return JsonResponse({'error': 'Missing required parameters: date, time, or timezone'}, status=400)
-    result = logic.get_panchanga(date, time, timezone)
-    return JsonResponse(result)"""
+    result = logic.get_panchanga_nasa(date, time, timezone,lat,lon,elev)
+    return JsonResponse(result,json_dumps_params={"ensure_ascii": False})"""
 
 def get_panchangam(request):
     date = request.GET.get("date")       # "2025-11-14"
