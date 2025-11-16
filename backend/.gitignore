@@ -1,0 +1,3 @@
+#ignore venv, logic/download_ephemeris.py
+venv/
+logic/download_ephemeris.py

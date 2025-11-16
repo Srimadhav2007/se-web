@@ -1,0 +1,5 @@
+django
+django-cors-headers
+numpy
+requests
+pyswisseph
