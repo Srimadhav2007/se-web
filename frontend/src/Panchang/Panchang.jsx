@@ -7,7 +7,18 @@ import background from '../assets/video.mp4';
 
 /* ---------- Utilities ---------- */
 function pad(n, len = 2) { return String(n).padStart(len, '0'); }
+function hhmmFromIso(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    // use local time formatting but keep hour:minute
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch (e) {
+    return '—';
+  }
+}
 
+/* computeFromSeconds same as before - used by HinduPanel */
 function computeFromSeconds(s) {
   const SEC_PRANA = 4;
   const SEC_VINADI = 24;
@@ -164,7 +175,7 @@ export default function Panchang() {
     elev: 151
   });
 
-  const [locStatus, setLocStatus] = useState(''); // messages for geolocation
+  const [locStatus, setLocStatus] = useState('');
   const [geoBusy, setGeoBusy] = useState(false);
 
   async function fetchPanchang(data) {
@@ -180,6 +191,10 @@ export default function Panchang() {
           elev: data.elev
         }
       });
+      // backend sometimes returns HTML (error). Ensure it's JSON.
+      if (response.status !== 200 || typeof response.data !== 'object') {
+        throw new Error('Unexpected response from server');
+      }
       setPanchang(response.data);
       setShowPanchang(true);
       setShowModal(false);
@@ -187,12 +202,16 @@ export default function Panchang() {
       console.log('Panchang fetched:', response.data);
     } catch (error) {
       console.error("Error fetching Panchang:", error);
-      // If server responded with JSON error, show it
       if (error.response && error.response.data) {
         const d = error.response.data;
-        alert("Panchang fetch failed: " + (d.error || JSON.stringify(d)));
+        // If backend returned JSON error
+        if (d.error) {
+          alert("Panchang fetch failed: " + (d.error || JSON.stringify(d)));
+        } else {
+          alert("Panchang fetch failed: Unexpected server response.");
+        }
       } else {
-        alert("Failed to fetch Panchang data. Please try again.");
+        alert("Failed to fetch Panchang data. Please check backend logs.");
       }
     } finally {
       setLoading(false);
@@ -210,7 +229,6 @@ export default function Panchang() {
     }));
   }
 
-  // Preset city list
   const presets = [
     { label: 'Tirupati (default)', lat: 13.6288, lon: 79.4192 },
     { label: 'Hyderabad', lat: 17.3850, lon: 78.4867 },
@@ -230,7 +248,6 @@ export default function Panchang() {
     }
   }
 
-  // Get timezone from coords using tz-lookup (local)
   function detectTimezoneAndElevation(lat, lon) {
     try {
       setLocStatus('Detecting timezone & elevation...');
@@ -246,7 +263,6 @@ export default function Panchang() {
       }
     }
 
-    // fetch elevation via open-elevation
     const url = `https://api.open-elevation.com/api/v1/lookup?locations=${lat},${lon}`;
     fetch(url)
       .then(res => res.json())
@@ -266,7 +282,6 @@ export default function Panchang() {
       });
   }
 
-  // Use browser geolocation
   function useMyLocation() {
     if (!navigator.geolocation) {
       setLocStatus('Geolocation not supported by this browser.');
@@ -293,7 +308,6 @@ export default function Panchang() {
     );
   }
 
-  // when user manually edits lat/lon, re-run timezone/elevation detection after a small debounce
   useEffect(() => {
     const tid = setTimeout(() => {
       detectTimezoneAndElevation(formData.lat, formData.lon);
@@ -301,6 +315,15 @@ export default function Panchang() {
     return () => clearTimeout(tid);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.lat, formData.lon]);
+
+  // Helper to format muhurtha slot (backend returns display or start/end iso)
+  function formatSlot(slot) {
+    if (!slot) return '—';
+    if (slot.display) return slot.display;
+    const s = slot.start_iso ? hhmmFromIso(slot.start_iso) : '—';
+    const e = slot.end_iso ? hhmmFromIso(slot.end_iso) : '—';
+    return `${s}-${e}${slot.ends_next_day ? '+' : ''}`;
+  }
 
   return (
     <div className={styles.pageRoot}>
@@ -452,6 +475,32 @@ export default function Panchang() {
                 </div>
               </div>
 
+              {/* Muhurthas card */}
+              <div className={styles.card}>
+                <h3 className={styles.cardTitle}>⏳ Muhurthas & Periods</h3>
+                <div className={styles.grid}>
+                  <div className={styles.item}><span className={styles.label}>Rāhukālam:</span><span className={styles.value}>{formatSlot(panchang.muhurthas?.rahukalam) ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Gulika:</span><span className={styles.value}>{formatSlot(panchang.muhurthas?.gulika) ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Yamaganda:</span><span className={styles.value}>{formatSlot(panchang.muhurthas?.yamaganda) ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Brahma Muhūrta:</span><span className={styles.value}>{formatSlot(panchang.muhurthas?.brahma_muhurta) ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Abhijit Muhūrta:</span><span className={styles.value}>{formatSlot(panchang.muhurthas?.abhijit_muhurta) ?? '—'}</span></div>
+
+                  {/* optional: show day slots (8 parts) for debugging / visual */}
+                  <div className={styles.itemFull}>
+                    <div className={styles.smallLabel}>Day divided into 8 slots:</div>
+                    <div className={styles.smallValue}>
+                      {Array.isArray(panchang.muhurthas?.day_slots) ? (
+                        <ol className={styles.daySlotsList}>
+                          {panchang.muhurthas.day_slots.map((ds, i) => (
+                            <li key={i}>{i+1}. {formatSlot(ds)}</li>
+                          ))}
+                        </ol>
+                      ) : <span>—</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Raw debug block for hindu_time (optional) */}
               <div className={styles.card}>
                 <h3 className={styles.cardTitle}>🕰️ Hindu Time (server)</h3>
@@ -462,7 +511,7 @@ export default function Panchang() {
                 </div>
               </div>
 
-              <div className={styles.footer}><p>🕉️ Calculated using server-side Panchang engine (drik - Skyfield)</p></div>
+              <div className={styles.footer}><p>🕉️ Calculated using server-side Panchang engine (drik - pyswisseph / Lahiri)</p></div>
             </div>
           </div>
         )}

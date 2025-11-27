@@ -1,0 +1,621 @@
+# backend/logic/drik.py
+"""
+Panchang core (pyswisseph, Lahiri sidereal).
+Exports:
+ - get_core_panchanga(date_str, time_str, tz_name, lat, lon, elev)
+ - get_hindu_time(date_str, time_str, tz_name, core)
+ - merge_panchanga(core, hindu)
+
+Notes:
+ - Requires pyswisseph (pip install pyswisseph)
+ - Uses Lahiri ayanamsa (swe.set_sid_mode(swe.SIDM_LAHIRI))
+ - Returns merged strings for nakshatra and yoga (e.g., "Rohini (4)").
+ - Includes muhurthas with ISO times, display strings and ends_next_day flags.
+"""
+
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+import math
+import swisseph as swe
+import os
+
+# --- configure ephemeris path if a local folder exists ---
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+LOCAL_EPH_DIR = os.path.join(THIS_DIR, "ephemeris")
+if os.path.isdir(LOCAL_EPH_DIR):
+    swe.set_ephe_path(LOCAL_EPH_DIR)
+
+# Use Lahiri ayanamsa (sidereal)
+swe.set_sid_mode(swe.SIDM_LAHIRI)
+
+# --- lookup tables ---
+NAKSHATRAS = [
+    "Ashwini", "Bharani", "Krittika", "Rohini", "Mrigashirsha",
+    "Ardra", "Punarvasu", "Pushya", "Ashlesha", "Magha",
+    "Purva Phalguni", "Uttara Phalguni", "Hasta", "Chitra", "Swati",
+    "Vishakha", "Anuradha", "Jyeshtha", "Mula", "Purva Ashadha",
+    "Uttara Ashadha", "Shravana", "Dhanishta", "Shatabhisha", "Purva Bhadrapada",
+    "Uttara Bhadrapada", "Revati"
+]
+
+RASHIS = [
+    "Mesha", "Vrishabha", "Mithuna", "Karka", "Simha", "Kanya",
+    "Tula", "Vrischika", "Dhanu", "Makara", "Kumbha", "Meena"
+]
+
+MOVABLE_KARANAS = ["Bava", "Balava", "Kaulava", "Taitila", "Garaja", "Vanija", "Vishti"]
+FIXED_KARANAS = ["Shakuni", "Chatushpada", "Naga", "Kistughna"]
+
+YOGA_NAMES = [
+    "Vishkambha", "Priti", "Ayushman", "Saubhagya", "Shobhana",
+    "Atiganda", "Sukarman", "Dhriti", "Shoola", "Ganda",
+    "Vriddhi", "Dhruva", "Vyaghata", "Harshana", "Vajra",
+    "Siddhi", "Vyatipata", "Variyana", "Parigha", "Shiva",
+    "Siddha", "Sadhya", "Shubha", "Shukla", "Brahma",
+    "Indra", "Vaidhriti"
+]
+
+# Rahukalam slot mapping by weekday (0=Sunday .. 6=Saturday) -> slot index 1..8
+RAHU_SLOT_FOR_WEEKDAY = {
+    0: 8,  # Sunday
+    1: 2,  # Monday
+    2: 7,  # Tuesday
+    3: 5,  # Wednesday
+    4: 6,  # Thursday
+    5: 4,  # Friday
+    6: 3   # Saturday
+}
+
+# Yamaganda slot mapping (can be adjusted if you want different convention)
+# This is a commonly used mapping; tweak if you compare with another source.
+YAMAGANDA_SLOT_FOR_WEEKDAY = {
+    0: 2,  # Sunday
+    1: 7,
+    2: 5,
+    3: 6,
+    4: 4,
+    5: 3,
+    6: 8
+}
+
+# -----------------------
+# Helpers: time & JD conversions
+# -----------------------
+def _local_to_utc_dt(date_str, time_str, tz_name):
+    tz = ZoneInfo(tz_name)
+    dt_local = datetime.fromisoformat(f"{date_str}T{time_str}")
+    if dt_local.tzinfo is None:
+        dt_local = dt_local.replace(tzinfo=tz)
+    dt_utc = dt_local.astimezone(timezone.utc)
+    return dt_local, dt_utc
+
+def _utc_to_jd(dt_utc):
+    """Return Julian Day (UT) for a timezone-aware UTC datetime."""
+    y = dt_utc.year
+    m = dt_utc.month
+    d = dt_utc.day
+    hour = dt_utc.hour + dt_utc.minute/60.0 + dt_utc.second/3600.0 + dt_utc.microsecond/3600.0/1e6
+    return swe.julday(y, m, d, hour)
+
+def _jd_to_utc_dt(jd):
+    """Convert JD to timezone-aware UTC datetime (coarse seconds precision)."""
+    y, m, d, hour = swe.revjul(jd)
+    h = int(hour)
+    rem = (hour - h) * 3600.0
+    mi = int(rem // 60)
+    sec = int(rem - mi * 60)
+    return datetime(int(y), int(m), int(d), int(h), int(mi), int(sec), tzinfo=timezone.utc)
+
+def _display_time_with_plus(dt_local):
+    """Return time string like '4:47' and append '+' if date not today (or None)."""
+    if dt_local is None:
+        return "—"
+    tstr = dt_local.strftime("%-I:%M") if hasattr(dt_local, "strftime") else str(dt_local)
+    # append '+' if the end date differs from the start date's day (caller must decide)
+    return tstr
+
+def _normalize_deg(x):
+    a = float(x) % 360.0
+    if a < 0:
+        a += 360.0
+    return a
+
+# -----------------------
+# Swiss Ephemeris wrappers
+# -----------------------
+def _sidereal_longitudes_at_jd(jd_ut):
+    """
+    Return (sun_lon_deg, moon_lon_deg) sidereal (Lahiri) using swe.calc_ut.
+    """
+    flag = swe.FLG_SWIEPH
+    s = swe.calc_ut(jd_ut, swe.SUN, flag)
+    m = swe.calc_ut(jd_ut, swe.MOON, flag)
+    # s[0][0] style: first tuple/list contains longitude at index 0
+    try:
+        sun_lon = float(s[0][0])
+    except Exception:
+        sun_lon = float(s[0])
+    try:
+        moon_lon = float(m[0][0])
+    except Exception:
+        moon_lon = float(m[0])
+    return _normalize_deg(sun_lon), _normalize_deg(moon_lon)
+
+# -----------------------
+# Core element computations (canonical)
+# -----------------------
+def _tithi_from_longitudes(sun_lon, moon_lon):
+    diff = _normalize_deg(moon_lon - sun_lon)
+    idx0 = int(math.floor(diff / 12.0))  # 0..29
+    return idx0 + 1
+
+def _paksha_from_tithi(tithi):
+    return "Shukla" if tithi <= 15 else "Krishna"
+
+def _nakshatra_from_moon(moon_lon):
+    moon_min = moon_lon * 60.0
+    idx0 = int(math.floor(moon_min // 800.0))
+    if idx0 < 0: idx0 = 0
+    if idx0 > 26: idx0 = 26
+    return idx0 + 1, NAKSHATRAS[idx0]
+
+def _yoga_from_sun_moon(sun_lon, moon_lon):
+    total_min = _normalize_deg(sun_lon + moon_lon) * 60.0
+    idx0 = int(math.floor(total_min // 800.0))
+    if idx0 < 0: idx0 = 0
+    if idx0 > 26: idx0 = 26
+    return idx0 + 1, YOGA_NAMES[idx0] if idx0 < len(YOGA_NAMES) else f"Yoga{idx0+1}"
+
+def _karana_from_longitudes(sun_lon, moon_lon):
+    diff = _normalize_deg(moon_lon - sun_lon)
+    half_idx = int(math.floor(diff / 6.0))  # 0..59
+    if half_idx >= 56:
+        return FIXED_KARANAS[half_idx - 56]
+    else:
+        return MOVABLE_KARANAS[half_idx % 7]
+
+def _rashi_from_moon(moon_lon):
+    idx = int(math.floor(moon_lon / 30.0))
+    if idx < 0: idx = 0
+    if idx > 11: idx = 11
+    return RASHIS[idx]
+
+# -----------------------
+# Root-finders for exact boundaries
+# -----------------------
+def _find_boundary_for_angle(func_angle_jd, start_local_dt, end_local_dt, tz_name, target_deg):
+    """
+    Binary search for time where func_angle_jd(jd) crosses target_deg (mod 360).
+    func_angle_jd: function(jd) -> angle_deg (0..360)
+    start_local_dt, end_local_dt: timezone-aware local datetimes bracketing the event
+    Returns timezone-aware local datetime when crossing occurs, or None.
+    """
+    tz = ZoneInfo(tz_name)
+    a_utc = start_local_dt.astimezone(timezone.utc)
+    b_utc = end_local_dt.astimezone(timezone.utc)
+    a_jd = _utc_to_jd(a_utc)
+    b_jd = _utc_to_jd(b_utc)
+
+    def f(jd):
+        ang = func_angle_jd(jd)
+        diff = _normalize_deg(ang - target_deg)
+        # map to -180..180
+        if diff > 180:
+            diff -= 360.0
+        return diff
+
+    fa = f(a_jd)
+    fb = f(b_jd)
+    if fa == 0:
+        return a_utc.astimezone(tz)
+    if fb == 0:
+        return b_utc.astimezone(tz)
+    if fa * fb > 0:
+        # not bracketed
+        return None
+
+    tol_seconds = 1.0
+    while (b_jd - a_jd) * 86400.0 > tol_seconds:
+        m_jd = 0.5 * (a_jd + b_jd)
+        fm = f(m_jd)
+        if fa * fm <= 0:
+            b_jd = m_jd
+            fb = fm
+        else:
+            a_jd = m_jd
+            fa = fm
+
+    mid_dt_utc = _jd_to_utc_dt(0.5 * (a_jd + b_jd))
+    return mid_dt_utc.astimezone(tz)
+
+# wrapper angle functions
+def _angle_tithi_jd(jd):
+    s, m = _sidereal_longitudes_at_jd(jd)
+    return _normalize_deg(m - s)
+
+def _angle_nakshatra_jd(jd):
+    _, m = _sidereal_longitudes_at_jd(jd)
+    return _normalize_deg(m)  # nakshatra boundaries at multiples of 13°20' (800')
+def _angle_yoga_jd(jd):
+    s, m = _sidereal_longitudes_at_jd(jd)
+    return _normalize_deg(s + m)
+
+# -----------------------
+# Sunrise / sunset via altitude crossing (sampling + refine)
+# -----------------------
+def _altitude_of_body_jd(jd_ut, body, lat_deg, lon_deg):
+    """
+    Compute topocentric altitude approx for body at JD UT (using swe.calc_ut equatorial and sidereal corrections).
+    This is an approximate method adequate for sunrise/sunset detection.
+    """
+    # get RA/Dec via equatorial
+    flag = swe.FLG_SWIEPH | swe.FLG_EQUATORIAL
+    r = swe.calc_ut(jd_ut, body, flag)
+    try:
+        ra = float(r[0][0])
+        dec = float(r[0][1])
+    except Exception:
+        ra = float(r[0])
+        dec = float(r[1])
+    # compute local sidereal time (hours) and then HA
+    gmst = swe.sidtime(jd_ut)  # hours
+    lst_hours = (gmst + lon_deg/15.0) % 24.0
+    lst_deg = lst_hours * 15.0
+    ha_deg = _normalize_deg(lst_deg - ra)
+    if ha_deg > 180:
+        ha_deg -= 360.0
+    # altitude formula
+    lat_r = math.radians(lat_deg)
+    dec_r = math.radians(dec)
+    ha_r = math.radians(ha_deg)
+    sin_alt = math.sin(lat_r)*math.sin(dec_r) + math.cos(lat_r)*math.cos(dec_r)*math.cos(ha_r)
+    sin_alt = max(-1.0, min(1.0, sin_alt))
+    alt_r = math.asin(sin_alt)
+    return math.degrees(alt_r)
+
+def _find_sunrise_sunset_for_local_date(date_local, tz_name, lat, lon, elev):
+    """
+    Returns (sunrise_local_dt, sunset_local_dt). Attempts to find sunrise and sunset on the given local date.
+    If not found (e.g., polar day/night), returns reasonable fallback times (06:30, 18:30).
+    """
+    tz = ZoneInfo(tz_name)
+    local_midnight = date_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_local = local_midnight - timedelta(hours=12)
+    end_local = local_midnight + timedelta(hours=36)
+    step = timedelta(minutes=10)
+
+    def jd_of(dt):
+        return _utc_to_jd(dt.astimezone(timezone.utc))
+
+    # find sunrise (sun altitude crossing upward) and sunset (crossing downward) on that local date
+    sunrise = None
+    sunset = None
+    prev_alt = None
+    prev_dt = None
+    dt = start_local
+    while dt <= end_local:
+        jd = jd_of(dt)
+        alt = _altitude_of_body_jd(jd, swe.SUN, lat, lon)
+        if prev_alt is not None:
+            # detect crossing upward near 0 deg for sunrise
+            if prev_alt < 0 and alt >= 0:
+                dt_a = prev_dt
+                dt_b = dt
+                # refine with binary search on altitude
+                a_jd = jd_of(dt_a); b_jd = jd_of(dt_b)
+                for _ in range(40):
+                    m_jd = 0.5*(a_jd+b_jd)
+                    alt_m = _altitude_of_body_jd(m_jd, swe.SUN, lat, lon)
+                    if alt_m >= 0:
+                        b_jd = m_jd
+                    else:
+                        a_jd = m_jd
+                sunrise = _jd_to_utc_dt(0.5*(a_jd+b_jd)).astimezone(tz)
+            # detect crossing downward for sunset
+            if prev_alt >= 0 and alt < 0:
+                dt_a = prev_dt
+                dt_b = dt
+                a_jd = jd_of(dt_a); b_jd = jd_of(dt_b)
+                for _ in range(40):
+                    m_jd = 0.5*(a_jd+b_jd)
+                    alt_m = _altitude_of_body_jd(m_jd, swe.SUN, lat, lon)
+                    if alt_m < 0:
+                        b_jd = m_jd
+                    else:
+                        a_jd = m_jd
+                sunset = _jd_to_utc_dt(0.5*(a_jd+b_jd)).astimezone(tz)
+        prev_alt = alt
+        prev_dt = dt
+        dt += step
+
+    # fallback
+    if sunrise is None:
+        sunrise = local_midnight.replace(hour=6, minute=30, tzinfo=tz)
+    if sunset is None:
+        sunset = local_midnight.replace(hour=18, minute=30, tzinfo=tz)
+    return sunrise, sunset
+
+# -----------------------
+# Muhurta calculations (rahukalam, gulika, yamaganda, brahma, abhijit etc.)
+# -----------------------
+def _compute_muhurthas(sunrise_local, sunset_local, tz_name):
+    """
+    Using the standard "divide daytime into 8 equal parts" method to produce rahukalam/gulika/yamaganda.
+    Returns a dict of muhurthas with ISO strings and display strings.
+    """
+    tz = ZoneInfo(tz_name)
+    day_len = (sunset_local - sunrise_local).total_seconds()
+    part = day_len / 8.0
+    slots = []
+    for i in range(8):
+        start = sunrise_local + timedelta(seconds=part * i)
+        end = sunrise_local + timedelta(seconds=part * (i+1))
+        slots.append((start, end))
+
+    # rahukalam slot index for weekday (1..8)
+    weekday = sunrise_local.weekday()  # Monday=0 .. Sunday=6 -> adjust mapping key
+    # convert to Sunday=0 scheme:
+    sunday_based = (weekday + 1) % 7  # if weekday==6 (Sunday), sunday_based=0
+    rahu_index = RAHU_SLOT_FOR_WEEKDAY.get(sunday_based, 8)
+    rahu_slot = slots[rahu_index - 1]
+
+    # Gulika: conventional offset from Rahu (movable formula)
+    gulika_index = ((rahu_index + 5 - 1) % 8) + 1
+    gulika_slot = slots[gulika_index - 1]
+
+    # Yamaganda: use mapping table (can be tuned)
+    yamaganda_index = YAMAGANDA_SLOT_FOR_WEEKDAY.get(sunday_based, ((rahu_index + 3 - 1) % 8) + 1)
+    yamaganda_slot = slots[yamaganda_index - 1]
+
+    # Brahma muhurta: conventional 1h36m - 48m before sunrise (start = sunrise - 1h36m, end = sunrise - 48m)
+    bm_start = sunrise_local - timedelta(minutes=96)
+    bm_end = sunrise_local - timedelta(minutes=48)
+
+    # Abhijit muhurta: centered on solar noon (midpoint of sunrise and sunset), ±24 minutes
+    noon = sunrise_local + (sunset_local - sunrise_local) / 2
+    abh_start = noon - timedelta(minutes=24)
+    abh_end = noon + timedelta(minutes=24)
+
+    def mk_slot(slot):
+        s, e = slot
+        return {
+            "start_iso": s.isoformat(),
+            "end_iso": e.isoformat(),
+            "display": f"{s.strftime('%-I:%M')}-{e.strftime('%-I:%M')}" if s.date() == e.date() else f"{s.strftime('%-I:%M')}-{e.strftime('%-I:%M')}+",
+            "ends_next_day": s.date() != e.date()
+        }
+
+    mu = {
+        "rahukalam": mk_slot(rahu_slot),
+        "gulika": mk_slot(gulika_slot),
+        "yamaganda": mk_slot(yamaganda_slot),
+        "brahma_muhurta": {
+            "start_iso": bm_start.isoformat(),
+            "end_iso": bm_end.isoformat(),
+            "display": f"{bm_start.strftime('%-I:%M')}-{bm_end.strftime('%-I:%M')}",
+            "ends_next_day": bm_start.date() != bm_end.date()
+        },
+        "abhijit_muhurta": {
+            "start_iso": abh_start.isoformat(),
+            "end_iso": abh_end.isoformat(),
+            "display": f"{abh_start.strftime('%-I:%M')}-{abh_end.strftime('%-I:%M')}",
+            "ends_next_day": abh_start.date() != abh_end.date()
+        },
+        # raw slots for inspection / UI use
+        "day_slots": [mk_slot(s) for s in slots]
+    }
+    return mu
+
+# -----------------------
+# Public API functions
+# -----------------------
+def get_core_panchanga(date_str, time_str, tz_name, lat, lon, elev):
+    """
+    Compute core panchanga fields and muhurthas.
+    Returns dict with keys: instant, day_by_sunrise, full_moon, muhurthas
+    """
+    tz = ZoneInfo(tz_name)
+    dt_local, dt_utc = _local_to_utc_dt(date_str, time_str, tz_name)
+    jd = _utc_to_jd(dt_utc)
+
+    sun_lon, moon_lon = _sidereal_longitudes_at_jd(jd)
+    tithi = _tithi_from_longitudes(sun_lon, moon_lon)
+    paksha = _paksha_from_tithi(tithi)
+    nak_idx, nak_name = _nakshatra_from_moon(moon_lon)
+    yoga_idx, yoga_name = _yoga_from_sun_moon(sun_lon, moon_lon)
+    karana = _karana_from_longitudes(sun_lon, moon_lon)
+    rashi = _rashi_from_moon(moon_lon)
+
+    # find sunrise & sunset for the requested local date
+    sunrise_local, sunset_local = _find_sunrise_sunset_for_local_date(dt_local, tz_name, lat, lon, elev)
+
+    # compute end times for tithi, nakshatra, yoga, karana (attempt)
+    # For tithi: target = (tithi % 30) * 12 degrees (i.e., next boundary at (tithi_idx0+1)*12)
+    tithi_idx0 = tithi - 1
+    next_tithi_deg = ((tithi_idx0 + 1) * 12.0) % 360.0
+    # bracket: between current local time and local + 36 hours
+    t0 = dt_local
+    t1 = dt_local + timedelta(hours=36)
+    tithi_end = _find_boundary_for_angle(_angle_tithi_jd, t0, t1, tz_name, next_tithi_deg)
+
+    # nakshatra boundary: next multiple of 13°20' (800' = 13.3333°)
+    moon_min = moon_lon * 60.0
+    cur_nak0 = int(math.floor(moon_min // 800.0))
+    next_nak_min = (cur_nak0 + 1) * 800.0
+    next_nak_deg = (next_nak_min / 60.0) % 360.0
+    nak_end = _find_boundary_for_angle(_angle_nakshatra_jd, t0, t1, tz_name, next_nak_deg)
+
+    # yoga boundary
+    total_min = _normalize_deg(sun_lon + moon_lon) * 60.0
+    cur_yoga0 = int(math.floor(total_min // 800.0))
+    next_yoga_min = (cur_yoga0 + 1) * 800.0
+    next_yoga_deg = (next_yoga_min / 60.0) % 360.0
+    yoga_end = _find_boundary_for_angle(_angle_yoga_jd, t0, t1, tz_name, next_yoga_deg)
+
+    # karana boundary (half-tithi)
+    half_idx = int(math.floor(_normalize_deg(moon_lon - sun_lon) / 6.0))
+    next_half_deg = ((half_idx + 1) * 6.0) % 360.0
+    karana_end = _find_boundary_for_angle(_angle_tithi_jd, t0, t1, tz_name, next_half_deg)
+
+    # next full moon (search within 40 days by minimizing |moon-sun-180|)
+    best_jd = None
+    best_diff = 1e9
+    for d in range(0, 40):
+        dt_try = dt_utc + timedelta(days=d)
+        jd_try = _utc_to_jd(dt_try)
+        s_lon, m_lon = _sidereal_longitudes_at_jd(jd_try)
+        diff = abs((_normalize_deg(m_lon - s_lon) - 180.0))
+        if diff < best_diff:
+            best_diff = diff
+            best_jd = jd_try
+    # refine around best_jd within ±1 day with 1-hour sampling
+    best_jd2 = best_jd
+    best_diff2 = best_diff
+    for minutes in range(-24*60, 24*60+1, 30):
+        j = best_jd + minutes / 1440.0
+        s_lon, m_lon = _sidereal_longitudes_at_jd(j)
+        diff = abs((_normalize_deg(m_lon - s_lon) - 180.0))
+        if diff < best_diff2:
+            best_diff2 = diff
+            best_jd2 = j
+    next_full_utc = _jd_to_utc_dt(best_jd2)
+    next_full_local = next_full_utc.astimezone(tz)
+
+    # sunrise values (at sunrise moment)
+    try:
+        jd_sr = _utc_to_jd(sunrise_local.astimezone(timezone.utc))
+        sun_sr, moon_sr = _sidereal_longitudes_at_jd(jd_sr)
+        tithi_sr = _tithi_from_longitudes(sun_sr, moon_sr)
+        paksha_sr = _paksha_from_tithi(tithi_sr)
+        nak_idx_sr, nak_name_sr = _nakshatra_from_moon(moon_sr)
+        yoga_sr_idx, yoga_sr_name = _yoga_from_sun_moon(sun_sr, moon_sr)
+        rashi_sr = _rashi_from_moon(moon_sr)
+    except Exception:
+        tithi_sr = paksha_sr = nak_name_sr = yoga_sr_name = rashi_sr = None
+        nak_idx_sr = None
+        yoga_sr_idx = None
+
+    # merged fields
+    merged_nak = f"{nak_name} ({nak_idx})"
+    merged_nak_sr = f"{nak_name_sr} ({nak_idx_sr})" if (nak_name_sr is not None and nak_idx_sr is not None) else None
+    merged_nak_fm = None
+
+    merged_yoga = f"{yoga_name} ({yoga_idx})"
+    merged_yoga_sr = f"{yoga_sr_name} ({yoga_sr_idx})" if (yoga_sr_name is not None and yoga_sr_idx is not None) else None
+
+    # muhurthas
+    mu = _compute_muhurthas(sunrise_local, sunset_local, tz.key)
+
+    core = {
+        "instant": {
+            "tithi": tithi,
+            "paksha": paksha,
+            "tithi_end_local": tithi_end.isoformat() if tithi_end else None,
+            "tithi_end_ends_next_day": (tithi_end.date() != dt_local.date()) if tithi_end else False,
+            "tithi_end_display": (tithi_end.strftime("%-I:%M") + ("+" if (tithi_end and tithi_end.date() != dt_local.date()) else "")) if tithi_end else None,
+            "nakshatra": merged_nak,
+            "nakshatra_end_local": nak_end.isoformat() if nak_end else None,
+            "nakshatra_end_ends_next_day": (nak_end.date() != dt_local.date()) if nak_end else False,
+            "nakshatra_end_display": (nak_end.strftime("%-I:%M") + ("+" if (nak_end and nak_end.date() != dt_local.date()) else "")) if nak_end else None,
+            "rashi": rashi,
+            "yoga": merged_yoga,
+            "yoga_end_local": yoga_end.isoformat() if yoga_end else None,
+            "yoga_end_ends_next_day": (yoga_end.date() != dt_local.date()) if yoga_end else False,
+            "yoga_end_display": (yoga_end.strftime("%-I:%M") + ("+" if (yoga_end and yoga_end.date() != dt_local.date()) else "")) if yoga_end else None,
+            "karana": karana,
+            "karana_end_local": karana_end.isoformat() if karana_end else None,
+            "karana_end_ends_next_day": (karana_end.date() != dt_local.date()) if karana_end else False,
+            "karana_end_display": (karana_end.strftime("%-I:%M") + ("+" if (karana_end and karana_end.date() != dt_local.date()) else "")) if karana_end else None,
+        },
+        "day_by_sunrise": {
+            "sunrise_local": sunrise_local.isoformat(),
+            "sunset_local": sunset_local.isoformat(),
+            "tithi": tithi_sr,
+            "paksha": paksha_sr,
+            "nakshatra": merged_nak_sr,
+            "yoga": merged_yoga_sr,
+            "rashi_moon": rashi_sr
+        },
+        "full_moon": {
+            "utc": next_full_utc.isoformat(),
+            "local": next_full_local.isoformat(),
+            "nakshatra": merged_nak_fm,
+            "masa": None
+        },
+        "muhurthas": mu,
+        "input_meta": {
+            "computed_using": "pyswisseph_lahiri"
+        }
+    }
+
+    return core
+
+def get_hindu_time(date_str, time_str, tz_name, core):
+    """
+    Compute Hindu-time units relative to sunrise in core['day_by_sunrise']['sunrise_local'].
+    """
+    tz = ZoneInfo(tz_name)
+    sr_iso = core.get("day_by_sunrise", {}).get("sunrise_local")
+    if sr_iso:
+        sunrise = datetime.fromisoformat(sr_iso)
+        if sunrise.tzinfo is None:
+            sunrise = sunrise.replace(tzinfo=tz)
+    else:
+        dt_local = datetime.fromisoformat(f"{date_str}T{time_str}")
+        if dt_local.tzinfo is None:
+            dt_local = dt_local.replace(tzinfo=tz)
+        sunrise = dt_local.replace(hour=6, minute=30, second=0, microsecond=0, tzinfo=tz)
+
+    now_local = datetime.now(tz)
+    diff = (now_local - sunrise).total_seconds()
+    if diff < 0:
+        diff += 24*3600
+
+    SEC_PRANA = 4
+    SEC_VINADI = 24
+    SEC_GHATI = 24*60
+    SEC_MUHURTA = 48*60
+
+    total_pranas = int(diff // SEC_PRANA)
+    total_vinadis = int(diff // SEC_VINADI)
+
+    ghaTi_count = int((diff // SEC_GHATI) % 60)
+    ghaTi_remainder = int(diff % SEC_GHATI)
+    gh_h = ghaTi_remainder // 3600
+    gh_m = (ghaTi_remainder % 3600) // 60
+    gh_s = ghaTi_remainder % 60
+
+    muhr_count = int((diff // SEC_MUHURTA) % 30)
+    muhr_rem = int(diff % SEC_MUHURTA)
+    mu_h = muhr_rem // 3600
+    mu_m = (muhr_rem % 3600) // 60
+    mu_s = muhr_rem % 60
+
+    vinadi_in_ghati = ghaTi_remainder // SEC_VINADI
+    prana_in_ghati = ghaTi_remainder // SEC_PRANA
+
+    def hhmmss(h,m,s):
+        return f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
+
+    return {
+        "now_local_iso": now_local.isoformat(),
+        "sunrise_local_iso": sunrise.isoformat(),
+        "seconds_since_sunrise": int(diff),
+        "total_pranas_since_sunrise": total_pranas,
+        "total_vinadis_since_sunrise": total_vinadis,
+        "ghaTi": {
+            "count": ghaTi_count,
+            "in_ghaTi_str": hhmmss(gh_h, gh_m, gh_s)
+        },
+        "muhurta": {
+            "count": muhr_count,
+            "in_muhurta_str": hhmmss(mu_h, mu_m, mu_s)
+        },
+        "vinadi": {"in_current_ghaTi": int(vinadi_in_ghati)},
+        "prana": {"in_current_ghaTi": int(prana_in_ghati)}
+    }
+
+def merge_panchanga(core, hindu):
+    core.setdefault("hindu_time", {})
+    core["hindu_time"].update(hindu)
+    return core
