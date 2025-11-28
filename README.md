@@ -1,10 +1,17 @@
       Panchangopedia
 
+To run the project : 
+You have to clone the git repo and in your PC, there are text files named requirements in both the frontend and the backend folders.
+These will tell you what all need to be downloaded for the app to run.
+
+Start frontend with 'npm run build' in command line.
+And in the backend directory type 'python manage.py runserver' in the command line to start the project.
+
+
 A website which can be used to convert the time we use today (hours, minutes and days or the Gregorian calendar) into the hindu time periods.
 Using Swiss Ephemeris / Skyfield-grade calculations, ensuring high accuracy.
 
-1. Uniqueness of Panchangopedia
-Panchangopedia is not just another Panchang-display app. Its uniqueness comes from the following pillars:
+1. Panchangopedia is not just another Panchang-display app. Its uniqueness comes from the following pillars:
 
 a) Real Astronomical Computation
 We compute Panchang elements (tithi, nakshatra, yoga, karana, masa, sunrise, sunset, muhurthas, etc.) using Swiss Ephemeris / Skyfield-grade calculations, ensuring high accuracy.
@@ -44,7 +51,7 @@ Panchangopedia explains:
 •	How Muhurtas are derived from sunrise-to-sunset day division
 This promotes cultural literacy backed by astronomical correctness.
 
-2. Features Implemented in Release-1
+2. Features Implemented
 
 1. Panchang Computation Engine
 •	Computes Tithi, Nakshatra, Yoga, Karana, Rashi (Moon)
@@ -90,7 +97,7 @@ This component gives Panchangopedia a signature feature.
 •	JSON API for frontend integration
  
 
-6Planet position calculator : 
+6. Planet position calculator : 
 
 We have made it so that we calculate the postion of the b=planets based on the date and time.
 We showed the positions of all of them respect to other planets, we also calculated 
@@ -105,9 +112,10 @@ In the sky view we calculated
 
 The video link to our project is here : 
 
-[Click to watch video](SE_web_video.mp4)
+[Watch the video on Google Drive](https://drive.google.com/file/d/1oy_biXGrc1GszXWug2e6GenPYjHwSMDX/view?usp=sharing)
 
 The screenshots from our project are : 
+
 
 
 
