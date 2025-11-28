@@ -126,6 +126,7 @@ function HinduPanel({ open, onClose, hinduTime }) {
               <div className={styles.unitValue}>
                 {hinduTime?.ghaTi?.count ?? (derived ? derived.ghatiCount : '—')} &nbsp;
                 ({derived ? `${pad(derived.ghatiH)}:${pad(derived.ghatiM)}:${pad(derived.ghatiS)}` : (hinduTime?.ghaTi?.in_ghaTi_str ?? '—')})
+                ({derived ? `${pad(derived.ghatiH)}:${pad(derived.ghatiM)}:${pad(derived.ghatiS)}` : (hinduTime?.ghaTi?.in_clock_str ?? '—')})              
               </div>
             </div>
 
@@ -444,6 +445,7 @@ export default function Panchang() {
                 <div className={styles.grid}>
                   <div className={styles.item}><span className={styles.label}>Tithi:</span><span className={styles.value}>{panchang.instant?.tithi ?? '—'} {panchang.instant?.paksha ? `(${panchang.instant.paksha})` : ''}</span></div>
                   <div className={styles.item}><span className={styles.label}>Nakshatra:</span><span className={styles.value}>{panchang.instant?.nakshatra ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Masa:</span><span className={styles.value}>{panchang.instant?.masa ?? '—'}</span></div>
                   <div className={styles.item}><span className={styles.label}>Rashi (Moon):</span><span className={styles.value}>{panchang.instant?.rashi ?? '—'}</span></div>
                   <div className={styles.item}><span className={styles.label}>Yoga:</span><span className={styles.value}>{panchang.instant?.yoga ?? '—'}</span></div>
                   <div className={styles.item}><span className={styles.label}>Karana:</span><span className={styles.value}>{panchang.instant?.karana ?? '—'}</span></div>
@@ -454,13 +456,13 @@ export default function Panchang() {
               <div className={styles.card}>
                 <h3 className={styles.cardTitle}>🌅 Day (by Sunrise)</h3>
                 <div className={styles.grid}>
-                  <div className={styles.item}><span className={styles.label}>Sunrise (local):</span><span className={styles.value}>{panchang.day_by_sunrise?.sunrise_local ? new Date(panchang.day_by_sunrise.sunrise_local).toLocaleTimeString() : '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Sunset (local):</span><span className={styles.value}>{panchang.day_by_sunrise?.sunset_local ? new Date(panchang.day_by_sunrise.sunset_local).toLocaleTimeString() : '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Tithi at Sunrise:</span><span className={styles.value}>{panchang.day_by_sunrise?.tithi ?? '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Paksha at Sunrise:</span><span className={styles.value}>{panchang.day_by_sunrise?.paksha ?? '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Nakshatra at Sunrise:</span><span className={styles.value}>{panchang.day_by_sunrise?.nakshatra ?? '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Yoga at Sunrise:</span><span className={styles.value}>{panchang.day_by_sunrise?.yoga ?? '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Rashi (Moon) at Sunrise:</span><span className={styles.value}>{panchang.day_by_sunrise?.rashi_moon ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Sunrise (local):</span><span className={styles.value}>{panchang.day?.sunrise ? new Date(panchang.day.sunrise).toLocaleTimeString() : '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Sunset (local):</span><span className={styles.value}>{panchang.day?.sunset ? new Date(panchang.day.sunset).toLocaleTimeString() : '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Tithi at Sunrise:</span><span className={styles.value}>{panchang.day?.tithi ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Paksha at Sunrise:</span><span className={styles.value}>{panchang.day?.paksha ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Nakshatra at Sunrise:</span><span className={styles.value}>{panchang.day?.nakshatra ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Yoga at Sunrise:</span><span className={styles.value}>{panchang.day?.yoga ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Rashi (Moon) at Sunrise:</span><span className={styles.value}>{panchang.day?.rashi ?? '—'}</span></div>
                 </div>
               </div>
 
@@ -468,10 +470,10 @@ export default function Panchang() {
               <div className={styles.card}>
                 <h3 className={styles.cardTitle}>🌕 Next Full Moon</h3>
                 <div className={styles.grid}>
-                  <div className={styles.item}><span className={styles.label}>UTC:</span><span className={styles.value}>{panchang.full_moon?.utc ?? '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Local:</span><span className={styles.value}>{panchang.full_moon?.local ? new Date(panchang.full_moon.local).toLocaleString() : '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Nakshatra:</span><span className={styles.value}>{panchang.full_moon?.nakshatra ?? '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Masa (month):</span><span className={styles.value}>{panchang.full_moon?.masa ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Date:</span><span className={styles.value}>{panchang.events?.next_full_moon ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Local:</span><span className={styles.value}>{panchang.events?.tithi_end ? new Date(panchang.events.tithi_end).toLocaleString() : '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Nakshatra:</span><span className={styles.value}>{panchang.events?.full_moon_nakshatra ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Masa (month):</span><span className={styles.value}>{panchang.events?.masa ?? '—'}</span></div>
                 </div>
               </div>
 
@@ -479,19 +481,20 @@ export default function Panchang() {
               <div className={styles.card}>
                 <h3 className={styles.cardTitle}>⏳ Muhurthas & Periods</h3>
                 <div className={styles.grid}>
-                  <div className={styles.item}><span className={styles.label}>Rāhukālam:</span><span className={styles.value}>{formatSlot(panchang.muhurthas?.rahukalam) ?? '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Gulika:</span><span className={styles.value}>{formatSlot(panchang.muhurthas?.gulika) ?? '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Yamaganda:</span><span className={styles.value}>{formatSlot(panchang.muhurthas?.yamaganda) ?? '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Brahma Muhūrta:</span><span className={styles.value}>{formatSlot(panchang.muhurthas?.brahma_muhurta) ?? '—'}</span></div>
-                  <div className={styles.item}><span className={styles.label}>Abhijit Muhūrta:</span><span className={styles.value}>{formatSlot(panchang.muhurthas?.abhijit_muhurta) ?? '—'}</span></div>
-
+                  <div className={styles.item}><span className={styles.label}>Rāhukālam:</span><span className={styles.value}>{formatSlot(panchang.periods?.rahukalam) ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Gulika:</span><span className={styles.value}>{formatSlot(panchang.periods?.gulika) ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Yamaganda:</span><span className={styles.value}>{formatSlot(panchang.periods?.yamaganda) ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Brahma Muhūrta:</span><span className={styles.value}>{formatSlot(panchang.periods?.brahma_muhurta) ?? '—'}</span></div>
+                  <div className={styles.item}><span className={styles.label}>Abhijit Muhūrta:</span><span className={styles.value}>{formatSlot(panchang.periods?.abhijit_muhurta) ?? '—'}</span></div>
+                  {/*<div className={styles.item}><span className={styles.label}>Varjyam:</span><span className={styles.value}>{formatSlot(panchang.periods?.varjyam) ?? '—'}</span></div>*/}
+                  {/*<div className={styles.item}><span className={styles.label}>Amritakalam:</span><span className={styles.value}>{formatSlot(panchang.periods?.amritakalam) ?? '—'}</span></div>*/}
                   {/* optional: show day slots (8 parts) for debugging / visual */}
                   <div className={styles.itemFull}>
                     <div className={styles.smallLabel}>Day divided into 8 slots:</div>
                     <div className={styles.smallValue}>
-                      {Array.isArray(panchang.muhurthas?.day_slots) ? (
+                      {Array.isArray(panchang.periods?.day_slots) ? (
                         <ol className={styles.daySlotsList}>
-                          {panchang.muhurthas.day_slots.map((ds, i) => (
+                          {panchang.periods.day_slots.map((ds, i) => (
                             <li key={i}>{i+1}. {formatSlot(ds)}</li>
                           ))}
                         </ol>

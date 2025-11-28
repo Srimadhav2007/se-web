@@ -63,9 +63,18 @@ def get_sunrise_sunset(date_local, tz_name, lat, lon, elev):
 # ------------------------------------------------------------
 
 RAHU_SLOTS = {0:8,1:2,2:7,3:5,4:6,5:4,6:3}
-YAMA_SLOTS = {0:2,1:7,2:5,3:6,4:4,5:3,6:8}
+YAMA_SLOTS = {
+    0: 5,  # Sunday
+    1: 1,
+    2: 3,
+    3: 4,
+    4: 6,
+    5: 7,
+    6: 2
+}
 GULIKA_SLOTS = {0:7,1:6,2:5,3:4,4:3,5:2,6:1}
 
+# ...existing code...
 def compute_muhurthas(sunrise_local, sunset_local, tz_name):
     tz = ZoneInfo(tz_name)
 
@@ -75,15 +84,26 @@ def compute_muhurthas(sunrise_local, sunset_local, tz_name):
     slots = []
     for i in range(8):
         s = sunrise_local + timedelta(seconds=part * i)
-        e = sunrise_local + timedelta(seconds=part * (i+1))
-        slots.append((s,e))
+        e = sunrise_local + timedelta(seconds=part * (i + 1))
+        slots.append((s, e))
 
     weekday = sunrise_local.weekday()
     sunday = (weekday + 1) % 7
 
-    def wrap(slot):
-        s,e = slot
-        disp = f"{fmt_hm(s)}-{fmt_hm(e)}"
+    def wrap_slot(slot):
+        s, e = slot
+
+        def round_min(dt):
+            # round seconds to nearest minute
+            if dt is None:
+                return "—"
+            seconds = dt.second + dt.microsecond / 1_000_000
+            if seconds >= 30:
+                dt = dt + timedelta(seconds=(60 - seconds))
+            dt = dt.replace(second=0, microsecond=0)
+            return fmt_hm(dt)
+
+        disp = f"{round_min(s)}-{round_min(e)}"
         if s.date() != e.date():
             disp += "+"
         return {
@@ -98,18 +118,19 @@ def compute_muhurthas(sunrise_local, sunset_local, tz_name):
     bm_end = sunrise_local - timedelta(minutes=48)
 
     # Abhijit: midday ± 24 min
-    midday = sunrise_local + (sunset_local - sunrise_local)/2
+    midday = sunrise_local + (sunset_local - sunrise_local) / 2
     abh_start = midday - timedelta(minutes=24)
     abh_end = midday + timedelta(minutes=24)
 
     return {
-        "rahukalam": wrap(slots[RAHU_SLOTS[sunday]-1]),
-        "yamaganda": wrap(slots[YAMA_SLOTS[sunday]-1]),
-        "gulika": wrap(slots[GULIKA_SLOTS[sunday]-1]),
-        "brahma_muhurta": wrap((bm_start, bm_end)),
-        "abhijit_muhurta": wrap((abh_start, abh_end)),
-        "day_slots": [wrap(s) for s in slots]
+        "rahukalam": wrap_slot(slots[RAHU_SLOTS[sunday] - 1]),
+        "yamaganda": wrap_slot(slots[YAMA_SLOTS[sunday] - 1]),
+        "gulika": wrap_slot(slots[GULIKA_SLOTS[sunday] - 1]),
+        "brahma_muhurta": wrap_slot((bm_start, bm_end)),
+        "abhijit_muhurta": wrap_slot((abh_start, abh_end)),
+        "day_slots": [wrap_slot(slot) for slot in slots]
     }
+# ...existing code...
 
 
 

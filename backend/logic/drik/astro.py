@@ -25,26 +25,17 @@ from .utils import (
 
 def _extract_lon(res):
     """
-    Normalize swisseph calc_ut() output across Linux/Mac/Windows:
-    Possible forms:
-        (lon, lat)
-        (lon, lat, dist)
-        ((lon, lat), extra)
-        ((lon,), extra)
-    We always return lon as float.
+    Robust extraction of longitude from swisseph.calc_ut() result across Windows/Linux variants.
+    Returns float longitude (degrees).
     """
-    # Case A: (lon, lat) or (lon, lat, dist)
-    if isinstance(res, (list, tuple)) and isinstance(res[0], (int, float)):
-        return float(res[0])
-
-    # Case B: ((lon, lat), something)
-    if isinstance(res, (list, tuple)) and isinstance(res[0], (list, tuple)):
-        inner = res[0]
-        if isinstance(inner[0], (int, float)):
-            return float(inner[0])
-
-    # If all fails:
-    raise ValueError(f"Unknown calc_ut output format: {res}")
+    # common: res = (lon, lat) or (lon, lat, dist)
+    if isinstance(res, (list, tuple)):
+        if len(res) >= 1 and isinstance(res[0], (int, float)):
+            return float(res[0])
+        # sometimes windows returns ((lon,lat), something)
+        if len(res) >= 1 and isinstance(res[0], (list, tuple)) and isinstance(res[0][0], (int, float)):
+            return float(res[0][0])
+    raise ValueError(f"Unknown calc_ut() output format: {res}")
 
 
 # -------------------------------------------------------
@@ -85,14 +76,15 @@ FIXED_KARANAS = ["Shakuni","Chatushpada","Naga","Kistughna"]
 # -------------------------------------------------------
 
 def tropical_sun_longitude(jd):
-    flag = swe.FLG_SWIEPH
+    """Tropical Sun longitude in degrees (explicit extraction)."""
+    flag = swe.FLG_SWIEPH  # tropical output
     res = swe.calc_ut(jd, swe.SUN, flag)
     lon = _extract_lon(res)
     return norm_deg(lon)
 
 
-
 def sidereal_moon_longitude(jd):
+    """Sidereal Moon longitude (Lahiri)."""
     flag = swe.FLG_SWIEPH | swe.FLG_SIDEREAL
     res = swe.calc_ut(jd, swe.MOON, flag)
     lon = _extract_lon(res)
@@ -100,6 +92,7 @@ def sidereal_moon_longitude(jd):
 
 
 def sidereal_sun_longitude(jd):
+    """Sidereal Sun longitude (Lahiri)."""
     flag = swe.FLG_SWIEPH | swe.FLG_SIDEREAL
     res = swe.calc_ut(jd, swe.SUN, flag)
     lon = _extract_lon(res)
@@ -138,18 +131,17 @@ def compute_nakshatra(jd):
 # -------------------------------------------------------
 # Yoga
 # -------------------------------------------------------
+
 def compute_yoga(jd):
     """
-    Drik Panchang formula:
-    Yoga = floor( (tropicalSun + siderealMoon) / 13°20' ) + 1
+    Drik: Yoga = floor((TropicalSun + SiderealMoon) / 13°20') + 1
     """
     sun = tropical_sun_longitude(jd)
     moon = sidereal_moon_longitude(jd)
     total = norm_deg(sun + moon)
     index = int((total * 60) // 800)
-    name = YOGA_NAMES[index]
-    return index + 1, name  # 1–27
-
+    name = YOGA_NAMES[index-2]
+    return index + 1, name
 
 # -------------------------------------------------------
 # Karana
@@ -178,8 +170,10 @@ def compute_karana(jd):
 def compute_rashi(jd):
     """Moon's rashi (sidereal)."""
     moon = sidereal_moon_longitude(jd)
-    index = int(moon // 30)
+    index = int(moon // 30) % 12
     return RASHIS[index]
+
+
 
 
 # -------------------------------------------------------
@@ -234,3 +228,111 @@ def binary_search_angle(func, start_jd, end_jd, target_deg, tol_seconds=1.0):
             fa = fm
 
     return 0.5 * (a + b)
+
+# -------------------------------------------------------
+# Masa (Purnimanta) — Sidereal Sun method
+# -------------------------------------------------------
+
+MASA_NAMES = [
+    "Chaitra","Vaishakha","Jyeshtha","Ashadha",
+    "Shravana","Bhadrapada","Ashwin","Kartika",
+    "Margashirsha","Pausha","Magha","Phalguna"
+]
+
+
+def compute_masa(jd):
+    """
+    Purnimanta Masa:
+    masa = floor(sidereal_sun_longitude / 30)
+
+    Example:
+    0°–30°  → Chaitra
+    30°–60° → Vaishakha
+    ...
+    240°–270° → Margashirsha
+    270°–300° → Pausha
+    """
+    sun_sid = sidereal_sun_longitude(jd)
+    idx = int(sun_sid // 30)
+    return MASA_NAMES[idx], idx
+
+
+# -------------------------------------------------------
+# Nakshatra helper for any JD (re-use existing logic)
+# -------------------------------------------------------
+
+def nakshatra_for_jd(jd):
+    idx, name = compute_nakshatra(jd)
+    return name, idx
+
+
+# -------------------------------------------------------
+# Full Moon Finder — High Accuracy (~1 second)
+# -------------------------------------------------------
+
+def find_next_full_moon(jd_start, max_days=40):
+    """
+    Find the next full moon: Moon - Sun = 180° (sidereal)
+
+    Steps:
+    1. Coarse scan: 1 hour steps
+    2. Detect crossing of elongation - 180
+    3. Binary refine to ±1 second
+
+    Returns:
+        jd_full (float)  - julian day (UT)
+    """
+    target = 180.0
+
+    # Coarse scan
+    step_hours = 1.0
+    step = step_hours / 24.0
+
+    prev_jd = jd_start
+    prev_diff = norm_deg(sidereal_moon_longitude(prev_jd) -
+                         sidereal_sun_longitude(prev_jd)) - target
+
+    for i in range(int(max_days * 24)):  # 40 days × 24 = 960 checks
+        jd = jd_start + (i + 1) * step
+        diff = norm_deg(sidereal_moon_longitude(jd) -
+                        sidereal_sun_longitude(jd)) - target
+
+        # Normalize to [-180,180]
+        if prev_diff > 180: prev_diff -= 360
+        if prev_diff < -180: prev_diff += 360
+        if diff > 180: diff -= 360
+        if diff < -180: diff += 360
+
+        # Zero-crossing
+        if prev_diff * diff <= 0:
+            # refine by binary search
+            return _refine_full_moon(prev_jd, jd, target)
+
+        prev_jd = jd
+        prev_diff = diff
+
+    return None
+
+
+def _refine_full_moon(j1, j2, target):
+    """Binary refine the full moon moment."""
+    for _ in range(60):  # ~60 iterations → sub-second precision
+        jm = 0.5 * (j1 + j2)
+        d1 = norm_deg(sidereal_moon_longitude(j1) -
+                       sidereal_sun_longitude(j1)) - target
+        d2 = norm_deg(sidereal_moon_longitude(jm) -
+                       sidereal_sun_longitude(jm)) - target
+
+        # normalize into [-180,180]
+        if d1 > 180: d1 -= 360
+        if d1 < -180: d1 += 360
+        if d2 > 180: d2 -= 360
+        if d2 < -180: d2 += 360
+
+        if d1 * d2 <= 0:
+            j2 = jm
+        else:
+            j1 = jm
+
+    return 0.5 * (j1 + j2)
+

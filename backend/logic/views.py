@@ -31,25 +31,18 @@ def get_panchangam(request):
 
     # Strictly call drik (Skyfield only)
     core = drik.get_core_panchanga(date, time, tz, lat, lon, elev)
-    hindu = core["hindu_time"]
+    hindu = drik.get_hindu_time(date, time, tz, core)
+    #core["hindu_time"]
 
-    return JsonResponse(core, safe=False)
+    final = drik.merge_panchanga(core, hindu)
 
-from django.http import JsonResponse
-from . import drik
-
-def get_panchangam(request):
-    date = request.GET.get("date")
-    time = request.GET.get("time")
-    tz = request.GET.get("timezone")
-    lat = float(request.GET.get("lat"))
-    lon = float(request.GET.get("lon"))
-    elev = float(request.GET.get("elev"))
-
-    core = drik.get_core_panchanga(date, time, tz, lat, lon, elev)
-
-    # hindu_time is already inside core, so no need to recompute
-    # old line removed:
-    # hindu = drik.get_hindu_time(date, time, tz, core)
-
-    return JsonResponse(core, safe=False)
+    final["input"] = {
+        "requested_date": date,
+        "requested_time": time,
+        "timezone": tz,
+        "latitude": lat,
+        "longitude": lon,
+        "elevation_m": elev,
+        "engine_used": "drik_skyfield"
+    }
+    return JsonResponse(final, json_dumps_params={"ensure_ascii": False})
