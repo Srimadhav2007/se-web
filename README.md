@@ -105,7 +105,7 @@ In the sky view we calculated
 
 The video link to our project is here : 
 
-
+[Click to watch video](SE_web_video.mp4)
 
 The screenshots from our project are : 
 
