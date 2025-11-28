@@ -46,3 +46,31 @@ def get_panchangam(request):
         "engine_used": "drik_skyfield"
     }
     return JsonResponse(final, json_dumps_params={"ensure_ascii": False})
+
+@require_GET
+def get_planet_positions(request):
+    """API endpoint to get planet positions."""
+    date = request.GET.get("date")
+    time = request.GET.get("time")
+    tz = request.GET.get("timezone", DEFAULT_TZ)
+    try:
+        lat = float(request.GET.get("lat", DEFAULT_LAT))
+    except (TypeError, ValueError):
+        lat = DEFAULT_LAT
+    try:
+        lon = float(request.GET.get("lon", DEFAULT_LON))
+    except (TypeError, ValueError):
+        lon = DEFAULT_LON
+    try:
+        elev = float(request.GET.get("elev", DEFAULT_ELEV))
+    except (TypeError, ValueError):
+        elev = DEFAULT_ELEV
+
+    if not (date and time):
+        return JsonResponse({"error": "Missing required parameters: date and time"}, status=400)
+
+    try:
+        positions = drik.get_planet_positions(date, time, tz, lat, lon, elev)
+        return JsonResponse(positions, json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
